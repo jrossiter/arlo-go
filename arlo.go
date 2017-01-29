@@ -29,13 +29,14 @@ var (
 	ErrRequestUnauthorized      = errors.New("401 unauthorized")
 )
 
-// Device modes
+// Device modes - assumes default mode listing order.
 const (
 	ModeDeviceArm    = "mode1"
 	ModeDeviceDisarm = "mode0"
 )
 
-type Arlo struct {
+// Client represents a client to the Arlo API.
+type Client struct {
 	// For initial login
 	Username string
 	Password string
@@ -51,16 +52,18 @@ type Arlo struct {
 	Verbose bool
 }
 
-func NewArlo() *Arlo {
+// NewClient returns a new Arlo client.
+func NewClient() *Client {
 	cookieJar, _ := cookiejar.New(nil)
 
-	return &Arlo{
+	return &Client{
 		HTTPClient:   &http.Client{Jar: cookieJar},
 		EventStreams: make(map[string]*EventStream),
 	}
 }
 
-func (a *Arlo) getCommonHeaders() map[string]string {
+// These headers are used for authenticated APIs.
+func (a *Client) getCommonHeaders() map[string]string {
 	return map[string]string{
 		"DNT":           "1",
 		"Host":          "arlo.netgear.com",
@@ -69,18 +72,19 @@ func (a *Arlo) getCommonHeaders() map[string]string {
 	}
 }
 
-func (a *Arlo) applyCommonHeaders(req *http.Request) {
+func (a *Client) applyCommonHeaders(req *http.Request) {
 	for key, value := range a.getCommonHeaders() {
 		req.Header.Add(key, value)
 	}
 }
 
-func (a *Arlo) hasLoggedIn() bool {
+func (a *Client) hasLoggedIn() bool {
 	return a.Token != ""
 }
 
-// Login logs into Arlo.
-func (a *Arlo) Login() error {
+// Login logs in and retrieves an access token.
+// The login response has been stripped down to values used by the library.
+func (a *Client) Login() error {
 	type loginRequest struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -88,18 +92,9 @@ func (a *Arlo) Login() error {
 
 	type loginResponse struct {
 		Data struct {
-			UserID        string `json:"userId"`
-			Email         string `json:"email"`
-			Token         string `json:"token"`
-			PaymentID     string `json:"paymentId"`
-			Authenticated int    `json:"authenticated"`
-			AccountStatus string `json:"accountStatus"`
-			SerialNumber  string `json:"serialNumber"`
-			CountryCode   string `json:"countryCode"`
-			TOCUpdate     bool   `json:"tocUpdate"`
-			PolicyUpdate  bool   `json:"policyUpdate"`
-			ValidEmail    bool   `json:"validEmail"`
-			Arlo          bool   `json:"arlo"`
+			UserID string `json:"userId"`
+			Email  string `json:"email"`
+			Token  string `json:"token"`
 		} `json:"data"`
 		Success bool `json:"success"`
 	}
@@ -148,8 +143,8 @@ func (a *Arlo) Login() error {
 	return nil
 }
 
-// Logout logs out of Arlo and clears vars.
-func (a *Arlo) Logout() error {
+// Logout logs the client out.
+func (a *Client) Logout() error {
 	req, err := http.NewRequest("PUT", baseURL+"/hmsweb/logout", nil)
 	if err != nil {
 		return err
@@ -168,8 +163,8 @@ func (a *Arlo) Logout() error {
 	return err
 }
 
-// GetDevices retrieves available devices from the Arlo servers.
-func (a *Arlo) GetDevices() ([]Device, error) {
+// GetDevices returns a list of available devices.
+func (a *Client) GetDevices() ([]Device, error) {
 	if !a.hasLoggedIn() {
 		return nil, ErrNotLoggedIn
 	}
@@ -224,7 +219,7 @@ func (a *Arlo) GetDevices() ([]Device, error) {
 
 // GetBasestation attempts to retrieve the basestation device from memory.
 // GetDevices() should be called beforehand.
-func (a *Arlo) GetBasestation() (*Device, error) {
+func (a *Client) GetBasestation() (*Device, error) {
 	for _, device := range a.Devices {
 		if device.IsBasestation() {
 			return &device, nil
@@ -235,7 +230,7 @@ func (a *Arlo) GetBasestation() (*Device, error) {
 
 // GetCameras attempts to retrieve a list of camera devices from memory.
 // GetDevices() should be called beforehand.
-func (a *Arlo) GetCameras() ([]Device, error) {
+func (a *Client) GetCameras() ([]Device, error) {
 	var cameras []Device
 	for _, device := range a.Devices {
 		if device.IsCamera() {
@@ -250,8 +245,8 @@ func (a *Arlo) GetCameras() ([]Device, error) {
 	return cameras, nil
 }
 
-// Subscribe connects to the event stream for the given device.
-func (a *Arlo) Subscribe(deviceID, xCloudID string) error {
+// Subscribe connects to the event stream for the given device ID.
+func (a *Client) Subscribe(deviceID, xCloudID string) error {
 	var err error
 
 	_, ok := a.EventStreams[deviceID]
@@ -298,10 +293,8 @@ func (a *Arlo) Subscribe(deviceID, xCloudID string) error {
 	return err
 }
 
-func (a *Arlo) Register(deviceID, xCloudID string) error {
-	//{"action":"set","resource":"subscriptions/"+self.user_id+"_web",
-	// "publishResponse":"false","properties":{"devices":[device_id]}})
-
+// Register registers a device to receive event stream messages.
+func (a *Client) Register(deviceID, xCloudID string) error {
 	properties := make(map[string][]string)
 	properties["devices"] = []string{deviceID}
 
@@ -323,6 +316,7 @@ func (a *Arlo) Register(deviceID, xCloudID string) error {
 	return nil
 }
 
+// NotifyPayload represents the message that will be sent to the Arlo servers via the Notify API.
 type NotifyPayload struct {
 	Action          string      `json:"action,omitempty"`
 	Resource        string      `json:"resource,omitempty"`
@@ -334,7 +328,7 @@ type NotifyPayload struct {
 	To      string `json:"to"`
 }
 
-func (a *Arlo) getTransID() string {
+func (a *Client) getTransID() string {
 	source := rand.NewSource(time.Now().UnixNano())
 	random := rand.New(source)
 
@@ -345,7 +339,9 @@ func (a *Arlo) getTransID() string {
 	return fmt.Sprintf("web!%s!%s", strings.ToLower(floatToHex(e)), strconv.Itoa(int(ms)))
 }
 
-func (a *Arlo) Notify(deviceID, xCloudID string, payload NotifyPayload) (string, error) {
+// Notify sends a message to the Arlo notify API.
+// A response will be returned via the device's SSE stream.
+func (a *Client) Notify(deviceID, xCloudID string, payload NotifyPayload) (string, error) {
 	payload.TransID = a.getTransID()
 	payload.From = fmt.Sprintf("%s_web", a.UserID)
 	payload.To = deviceID
@@ -384,14 +380,12 @@ func (a *Arlo) Notify(deviceID, xCloudID string, payload NotifyPayload) (string,
 	return payload.TransID, nil
 }
 
-func (a *Arlo) Arm(deviceID, xCloudID string) error {
+// Arm arms the basestation.
+func (a *Client) Arm(deviceID, xCloudID string) error {
 	err := a.Subscribe(deviceID, xCloudID)
 	if err != nil {
 		return err
 	}
-
-	// {"action":"set","resource":"modes","publishResponse":"true",
-	// "properties":{"active":"mode1"}})
 
 	properties := make(map[string]string)
 	properties["active"] = ModeDeviceArm
@@ -407,14 +401,12 @@ func (a *Arlo) Arm(deviceID, xCloudID string) error {
 	return err
 }
 
-func (a *Arlo) Disarm(deviceID, xCloudID string) error {
+// Disarm disarms the basestation.
+func (a *Client) Disarm(deviceID, xCloudID string) error {
 	err := a.Subscribe(deviceID, xCloudID)
 	if err != nil {
 		return err
 	}
-
-	// {"action":"set","resource":"modes","publishResponse":"true",
-	// "properties":{"active":"mode0"}})
 
 	properties := make(map[string]string)
 	properties["active"] = ModeDeviceDisarm
@@ -430,50 +422,7 @@ func (a *Arlo) Disarm(deviceID, xCloudID string) error {
 	return err
 }
 
-func floatToHex(x float64) string {
-	var result []byte
-	quotient := int(x)
-	fraction := x - float64(quotient)
-
-	for quotient > 0 {
-		quotient = int(x / 16)
-		remainder := int(x - (float64(quotient) * 16))
-
-		if remainder > 9 {
-			result = append([]byte{byte(remainder + 55)}, result...)
-		} else {
-			for _, c := range strconv.Itoa(int(remainder)) {
-				result = append([]byte{byte(c)}, result...)
-			}
-		}
-
-		x = float64(quotient)
-	}
-
-	if fraction == 0 {
-		return string(result)
-	}
-
-	result = append(result, '.')
-
-	for fraction > 0 {
-		fraction = fraction * 16
-		integer := int(fraction)
-		fraction = fraction - float64(integer)
-
-		if integer > 9 {
-			result = append(result, byte(integer+55))
-		} else {
-			for _, c := range strconv.Itoa(int(integer)) {
-				result = append(result, byte(c))
-			}
-		}
-	}
-
-	return string(result)
-}
-
-func (a *Arlo) verbose(params ...interface{}) {
+func (a *Client) verbose(params ...interface{}) {
 	if a.Verbose {
 		log.Println(params...)
 	}

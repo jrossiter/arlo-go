@@ -2,9 +2,9 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 
 	"github.com/BurntSushi/toml"
 	"github.com/jrossiter/arlo-go"
@@ -20,28 +20,24 @@ func main() {
 	verbose := flag.Int("v", 0, "Verbose")
 	flag.Parse()
 
-	var internalMode string
-
 	config := ArloConfig{}
-
 	content, err := ioutil.ReadFile("config.toml")
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	_, err = toml.Decode(string(content), &config)
 	if err != nil {
 		log.Panic(err)
 	}
 
+	var internalMode string
 	switch *mode {
 	case "arm":
 		internalMode = arlo.ModeDeviceArm
 	case "disarm":
 		internalMode = arlo.ModeDeviceDisarm
 	default:
-		fmt.Println("Invalid mode")
-		return
+		log.Fatal("Invalid mode")
 	}
 
 	err = ArmDisarm(config.Username, config.Password, internalMode, *verbose == 1)
@@ -49,11 +45,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	return
+	os.Exit(0)
 }
 
 func ArmDisarm(username, password, mode string, verbose bool) error {
-	a := arlo.NewArlo()
+	a := arlo.NewClient()
 	a.Username = username
 	a.Password = password
 	a.Verbose = verbose
