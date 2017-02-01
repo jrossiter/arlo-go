@@ -169,10 +169,6 @@ func (a *Client) GetDevices() ([]Device, error) {
 		return nil, ErrNotLoggedIn
 	}
 
-	type deviceRequest struct {
-		UnixTS int64 `json:"t"`
-	}
-
 	type deviceResponse struct {
 		Devices []Device `json:"data"`
 		Success bool     `json:"success"`
