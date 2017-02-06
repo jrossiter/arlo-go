@@ -159,6 +159,8 @@ func (a *Client) Logout() error {
 	a.UserID = ""
 	cookieJar, _ := cookiejar.New(nil)
 	a.HTTPClient.Jar = cookieJar
+	a.Devices = nil
+	a.EventStreams = make(map[string]*EventStream)
 
 	return err
 }
